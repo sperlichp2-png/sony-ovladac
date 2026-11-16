@@ -611,18 +611,152 @@ public class MainActivity extends Activity {
 
     // ---------- hlasové povely ----------
 
+    private static final int REQ_MIC = 43;
+    private android.speech.SpeechRecognizer recognizer;
+    private AlertDialog listenDialog;
+    private TextView listenText;
+
     private void startVoice() {
+        if (android.os.Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            return;
+        }
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+            startVoiceIntent(); // záloha: systémové okno
+            return;
+        }
+        listen();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_MIC) return;
+        if (results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            startVoice();
+        } else {
+            Toast.makeText(this, "Bez povolení mikrofonu hlasové ovládání nepůjde.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** Poslouchá přímo v aplikaci – bez otevírání asistenta. */
+    private void listen() {
+        stopListening();
+        recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this);
+        recognizer.setRecognitionListener(new android.speech.RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle p) { setListenText("Mluv… 🎤"); }
+            @Override public void onBeginningOfSpeech() { }
+            @Override public void onRmsChanged(float v) { }
+            @Override public void onBufferReceived(byte[] b) { }
+            @Override public void onEndOfSpeech() { setListenText("Zpracovávám…"); }
+            @Override public void onEvent(int t, Bundle p) { }
+            @Override public void onPartialResults(Bundle p) {
+                ArrayList<String> r = p.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION);
+                if (r != null && !r.isEmpty() && !r.get(0).isEmpty()) setListenText("„" + r.get(0) + "“");
+            }
+            @Override public void onResults(Bundle p) {
+                ArrayList<String> r = p.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION);
+                stopListening();
+                if (r == null || r.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Nic jsem neslyšel", Toast.LENGTH_SHORT).show();
+                } else {
+                    handleHeard(r);
+                }
+            }
+            @Override public void onError(int error) {
+                stopListening();
+                String msg;
+                switch (error) {
+                    case android.speech.SpeechRecognizer.ERROR_NO_MATCH:
+                    case android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                        msg = "Nic jsem neslyšel, zkus to znovu"; break;
+                    case android.speech.SpeechRecognizer.ERROR_NETWORK:
+                    case android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                        msg = "Rozpoznávání řeči potřebuje internet"; break;
+                    case android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                        msg = "Chybí povolení mikrofonu"; break;
+                    case android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                        msg = "Mikrofon je obsazený, zkus to znovu"; break;
+                    default:
+                        msg = "Rozpoznávání selhalo (chyba " + error + "). Zkus aktualizovat aplikaci Google.";
+                }
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+            }
+        });
+
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "cs-CZ");
-        i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Řekni povel, např. „zesil“, „kanál 5“, „Netflix“");
+        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+
+        listenText = new TextView(this);
+        listenText.setText("Připravuji mikrofon…");
+        listenText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        listenText.setGravity(Gravity.CENTER);
+        listenText.setPadding(px(20), px(24), px(20), px(8));
+        TextView hint = new TextView(this);
+        hint.setText("Např. „zesil“, „kanál 5“, „Netflix“, „hledej Pelíšky“");
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(px(20), 0, px(20), px(8));
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(listenText);
+        box.addView(hint);
+        listenDialog = new AlertDialog.Builder(this)
+                .setView(box)
+                .setNegativeButton("Zrušit", (d, w) -> stopListening())
+                .setOnCancelListener(d -> stopListening())
+                .create();
+        listenDialog.show();
+        buzz();
+        try {
+            recognizer.startListening(i);
+        } catch (Exception ex) {
+            stopListening();
+            Toast.makeText(this, "Mikrofon nejde spustit: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void setListenText(String t) {
+        if (listenText != null) listenText.setText(t);
+    }
+
+    private void stopListening() {
+        if (recognizer != null) {
+            try { recognizer.cancel(); } catch (Exception ignored) { }
+            recognizer.destroy();
+            recognizer = null;
+        }
+        if (listenDialog != null) {
+            AlertDialog d = listenDialog;
+            listenDialog = null;
+            if (d.isShowing()) d.dismiss();
+        }
+        listenText = null;
+    }
+
+    private void startVoiceIntent() {
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "cs-CZ");
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
         try {
             startActivityForResult(i, REQ_VOICE);
         } catch (ActivityNotFoundException e) {
-            Toast.makeText(this, "Rozpoznávání řeči není v telefonu dostupné (chybí aplikace Google).",
+            Toast.makeText(this, "Rozpoznávání řeči není v telefonu dostupné – nainstaluj aplikaci Google.",
                     Toast.LENGTH_LONG).show();
         }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        stopListening();
     }
 
     @Override
@@ -630,7 +764,10 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_VOICE || resultCode != RESULT_OK || data == null) return;
         ArrayList<String> heard = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-        if (heard == null || heard.isEmpty()) return;
+        if (heard != null && !heard.isEmpty()) handleHeard(heard);
+    }
+
+    private void handleHeard(ArrayList<String> heard) {
         String text = VoiceCommands.searchText(heard.get(0));
         if (text != null) {
             if (isWifi()) sendWifiText(text);
