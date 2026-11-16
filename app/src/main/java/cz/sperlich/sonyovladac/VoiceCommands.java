@@ -18,6 +18,16 @@ public final class VoiceCommands {
             "nula", "jedna", "dva", "tri", "ctyri", "pet", "sest", "sedm", "osm", "devet", "deset"
     };
 
+    private static final Pattern SEARCH = Pattern.compile(
+            "^\\s*(vyhledej|vyhledat|hledej|hledat|najdi|napiš|napis|napsat)\\s+(.+)$",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    /** „hledej Pelíšky“ → „Pelíšky“ (text pro vyhledávací pole), jinak null. */
+    public static String searchText(String raw) {
+        Matcher m = SEARCH.matcher(raw);
+        return m.matches() ? m.group(2).trim() : null;
+    }
+
     public static List<String> parse(String raw) {
         String t = normalize(raw);
         List<String> out = new ArrayList<>();

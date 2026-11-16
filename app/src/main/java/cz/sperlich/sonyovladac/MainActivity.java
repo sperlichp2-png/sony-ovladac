@@ -88,6 +88,10 @@ public class MainActivity extends Activity {
     private final Map<String, Key> keys = new HashMap<>();
     private static final int REQ_VOICE = 42;
     private TextView editToggle;
+    private TextView modeLabel;
+    private SharedPreferences settings;
+    private final java.util.concurrent.atomic.AtomicBoolean wifiBusy =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     private float dp;
 
     // ---------- životní cyklus ----------
@@ -97,6 +101,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         dp = getResources().getDisplayMetrics().density;
         prefs = getSharedPreferences("kody", MODE_PRIVATE);
+        settings = getSharedPreferences("nastaveni", MODE_PRIVATE);
         ir = (ConsumerIrManager) getSystemService(Context.CONSUMER_IR_SERVICE);
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
@@ -108,9 +113,11 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(Color.parseColor("#121212"));
         setContentView(buildUi());
 
-        if (ir == null || !ir.hasIrEmitter()) {
-            Toast.makeText(this, "Telefon nehlásí IR vysílač – ovladač nebude fungovat.",
+        if (!isWifi() && !hasIr()) {
+            Toast.makeText(this, "Telefon nemá IR vysílač – zapni Wi-Fi režim v ⚙.",
                     Toast.LENGTH_LONG).show();
+        } else if (isWifi() && wifiIp().isEmpty()) {
+            showSettings();
         }
     }
 
@@ -151,7 +158,18 @@ public class MainActivity extends Activity {
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setLetterSpacing(0.15f);
-        top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        top.addView(title);
+        modeLabel = new TextView(this);
+        modeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        modeLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        modeLabel.setPadding(px(10), px(2), px(10), px(2));
+        modeLabel.setOnClickListener(v -> showSettings());
+        refreshModeLabel();
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mlp.leftMargin = px(8);
+        top.addView(modeLabel, mlp);
+        top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         editToggle = new TextView(this);
         editToggle.setText("✎");
         editToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
@@ -170,7 +188,14 @@ public class MainActivity extends Activity {
         mic.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         mic.setPadding(px(12), px(4), px(12), px(4));
         mic.setOnClickListener(v -> startVoice());
+        TextView gear = new TextView(this);
+        gear.setText("⚙");
+        gear.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        gear.setTextColor(Color.parseColor("#8A8A8A"));
+        gear.setPadding(px(12), px(4), px(12), px(4));
+        gear.setOnClickListener(v -> showSettings());
         top.addView(mic);
+        top.addView(gear);
         top.addView(editToggle);
         body.addView(top);
         body.addView(remote, new LinearLayout.LayoutParams(
@@ -355,8 +380,13 @@ public class MainActivity extends Activity {
                             press(key);
                             repeater = new Runnable() {
                                 @Override public void run() {
-                                    sendKey(key, 1);
-                                    ui.postDelayed(this, 130);
+                                    if (isWifi()) {
+                                        if (!wifiBusy.get()) sendKey(key, 1);
+                                        ui.postDelayed(this, 200);
+                                    } else {
+                                        sendKey(key, 1);
+                                        ui.postDelayed(this, 130);
+                                    }
                                 }
                             };
                             ui.postDelayed(repeater, 450);
@@ -407,7 +437,161 @@ public class MainActivity extends Activity {
     // ---------- vysílání SIRC ----------
 
     private void sendKey(Key key, int frames) {
-        sendSirc(bits(key), addr(key), cmd(key), frames);
+        if (isWifi() && key.id.equals("power")) {
+            wifiPowerToggle();
+            return;
+        }
+        sendCode(bits(key), addr(key), cmd(key), frames);
+    }
+
+    /** Pošle kód podle zvoleného režimu (IR nebo Wi-Fi). */
+    private void sendCode(int bits, int address, int command, int frames) {
+        if (isWifi()) sendWifi(bits, address, command);
+        else sendSirc(bits, address, command, frames);
+    }
+
+    // ---------- Wi-Fi ----------
+
+    private boolean hasIr() { return ir != null && ir.hasIrEmitter(); }
+    private boolean isWifi() { return settings.getBoolean("wifi", !hasIr()); }
+    private String wifiIp() { return settings.getString("ip", ""); }
+    private BraviaWifi bravia() {
+        return new BraviaWifi(wifiIp(), settings.getString("psk", ""));
+    }
+
+    private void sendWifi(final int bits, final int address, final int command) {
+        final BraviaWifi tv = bravia();
+        wifiBusy.set(true);
+        irHandler.post(() -> {
+            try {
+                tv.sendKey(bits, address, command);
+            } catch (Exception ex) {
+                wifiError(ex);
+            } finally {
+                wifiBusy.set(false);
+            }
+        });
+    }
+
+    private void wifiPowerToggle() {
+        final BraviaWifi tv = bravia();
+        irHandler.post(() -> {
+            try {
+                boolean on;
+                try { on = tv.isOn(); } catch (Exception ex) { on = false; }
+                tv.setPower(!on);
+            } catch (Exception ex) {
+                wifiError(ex);
+            }
+        });
+    }
+
+    private void sendWifiText(final String text) {
+        final BraviaWifi tv = bravia();
+        irHandler.post(() -> {
+            try {
+                tv.sendText(text);
+                ui.post(() -> Toast.makeText(this, "Odesláno: „" + text + "“", Toast.LENGTH_SHORT).show());
+            } catch (Exception ex) {
+                ui.post(() -> Toast.makeText(this,
+                        "Text se nepodařilo poslat – nejdřív na TV otevři vyhledávací pole. ("
+                                + ex.getMessage() + ")", Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private long lastErrorToast = 0;
+
+    private void wifiError(final Exception ex) {
+        ui.post(() -> {
+            long now = System.currentTimeMillis();
+            if (now - lastErrorToast < 3000) return; // nezahltit obrazovku hláškami
+            lastErrorToast = now;
+            String msg = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+            if (ex instanceof java.net.SocketTimeoutException || ex instanceof java.net.ConnectException
+                    || ex instanceof java.net.NoRouteToHostException) {
+                msg = "Televize neodpovídá – je zapnutá a na stejné Wi-Fi? Sedí IP adresa?";
+            }
+            Toast.makeText(this, "Wi-Fi: " + msg, Toast.LENGTH_LONG).show();
+        });
+    }
+
+    private void refreshModeLabel() {
+        boolean w = isWifi();
+        modeLabel.setText(w ? "Wi-Fi" : "IR");
+        modeLabel.setTextColor(w ? Color.parseColor("#81D4FA") : Color.parseColor("#FFB300"));
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(px(10));
+        g.setStroke(px(1), w ? Color.parseColor("#81D4FA") : Color.parseColor("#FFB300"));
+        modeLabel.setBackground(g);
+    }
+
+    private void showSettings() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(px(20), px(8), px(20), 0);
+
+        final android.widget.RadioGroup group = new android.widget.RadioGroup(this);
+        final android.widget.RadioButton rIr = new android.widget.RadioButton(this);
+        rIr.setText(hasIr() ? "Infraport (IR)" : "Infraport (IR) – tento telefon ho nemá");
+        rIr.setId(View.generateViewId());
+        final android.widget.RadioButton rWifi = new android.widget.RadioButton(this);
+        rWifi.setText("Wi-Fi (síť)");
+        rWifi.setId(View.generateViewId());
+        group.addView(rIr);
+        group.addView(rWifi);
+        group.check(isWifi() ? rWifi.getId() : rIr.getId());
+        box.addView(group);
+
+        final EditText eIp = field(box, "IP adresa televize (např. 192.168.1.50)", wifiIp(), false);
+        eIp.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        final EditText ePsk = field(box, "Heslo – Pre-Shared Key", settings.getString("psk", ""), false);
+        ePsk.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+
+        TextView help = new TextView(this);
+        help.setText("Na televizi: Nastavení → Síť → Nastavení domácí sítě → IP control\n"
+                + "• Authentication: Normal and Pre-Shared Key\n"
+                + "• Pre-Shared Key: stejné heslo jako tady\n"
+                + "• Remote start: zapnout (zapínání přes Wi-Fi)\n"
+                + "IP adresu najdeš v Nastavení → Síť → Stav sítě.");
+        help.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        help.setPadding(0, px(10), 0, 0);
+        box.addView(help);
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(box);
+
+        final AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Nastavení")
+                .setView(sv)
+                .setPositiveButton("Uložit", null)
+                .setNeutralButton("Test spojení", null)
+                .setNegativeButton("Zrušit", null)
+                .create();
+        d.setOnShowListener(x -> {
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                settings.edit()
+                        .putBoolean("wifi", group.getCheckedRadioButtonId() == rWifi.getId())
+                        .putString("ip", eIp.getText().toString().trim())
+                        .putString("psk", ePsk.getText().toString().trim())
+                        .apply();
+                refreshModeLabel();
+                d.dismiss();
+            });
+            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                final BraviaWifi tv = new BraviaWifi(eIp.getText().toString(), ePsk.getText().toString());
+                Toast.makeText(this, "Zkouším spojení…", Toast.LENGTH_SHORT).show();
+                irHandler.post(() -> {
+                    String r;
+                    try { r = tv.test(); } catch (Exception ex) {
+                        r = "Nepovedlo se: " + (ex.getMessage() == null ? ex.toString() : ex.getMessage());
+                    }
+                    final String res = r;
+                    ui.post(() -> Toast.makeText(this, res, Toast.LENGTH_LONG).show());
+                });
+            });
+        });
+        d.show();
     }
 
     private void sendSirc(final int bits, final int address, final int command, final int frames) {
@@ -445,6 +629,12 @@ public class MainActivity extends Activity {
         if (requestCode != REQ_VOICE || resultCode != RESULT_OK || data == null) return;
         ArrayList<String> heard = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (heard == null || heard.isEmpty()) return;
+        String text = VoiceCommands.searchText(heard.get(0));
+        if (text != null) {
+            if (isWifi()) sendWifiText(text);
+            else Toast.makeText(this, "Psaní textu funguje jen ve Wi-Fi režimu.", Toast.LENGTH_LONG).show();
+            return;
+        }
         for (String phrase : heard) {
             List<String> seq = VoiceCommands.parse(phrase);
             if (!seq.isEmpty()) {
@@ -507,7 +697,7 @@ public class MainActivity extends Activity {
                 int[] p = parse(eBits, eAddr, eCmd);
                 if (p == null) return;
                 buzz();
-                sendSirc(p[0], p[1], p[2], 3);
+                sendCode(p[0], p[1], p[2], 3);
             });
             d.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
                 prefs.edit().remove(key.id + "_b").remove(key.id + "_a").remove(key.id + "_c").apply();
