@@ -153,12 +153,14 @@ public class MainActivity extends Activity {
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
-        title.setText("SONY  KD-55XD7005");
+        title.setText("SONY");
         title.setTextColor(Color.parseColor("#8A8A8A"));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setLetterSpacing(0.15f);
-        top.addView(title);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         modeLabel = new TextView(this);
         modeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         modeLabel.setTypeface(Typeface.DEFAULT_BOLD);
@@ -169,7 +171,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         mlp.leftMargin = px(8);
         top.addView(modeLabel, mlp);
-        top.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+
         editToggle = new TextView(this);
         editToggle.setText("✎");
         editToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
@@ -186,13 +188,13 @@ public class MainActivity extends Activity {
         TextView mic = new TextView(this);
         mic.setText("🎤");
         mic.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        mic.setPadding(px(12), px(4), px(12), px(4));
+        mic.setPadding(px(10), px(4), px(10), px(4));
         mic.setOnClickListener(v -> startVoice());
         TextView gear = new TextView(this);
         gear.setText("⚙");
         gear.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         gear.setTextColor(Color.parseColor("#8A8A8A"));
-        gear.setPadding(px(12), px(4), px(12), px(4));
+        gear.setPadding(px(10), px(4), px(10), px(4));
         gear.setOnClickListener(v -> showSettings());
         top.addView(mic);
         top.addView(gear);
