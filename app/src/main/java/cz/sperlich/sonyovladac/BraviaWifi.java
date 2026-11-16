@@ -66,6 +66,23 @@ public final class BraviaWifi {
         json("/sony/appControl", "setTextForm", "[\"" + esc + "\"]", "1.0");
     }
 
+    /** Seznam aplikací na televizi: každá položka {název, uri}. */
+    public java.util.List<String[]> apps() throws Exception {
+        String r = json("/sony/appControl", "getApplicationList", "[]", "1.0");
+        org.json.JSONArray arr = new org.json.JSONObject(r).getJSONArray("result").getJSONArray(0);
+        java.util.List<String[]> out = new java.util.ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            org.json.JSONObject o = arr.getJSONObject(i);
+            out.add(new String[]{o.optString("title"), o.optString("uri")});
+        }
+        return out;
+    }
+
+    public void launch(String uri) throws Exception {
+        String esc = uri.replace("\\", "\\\\").replace("\"", "\\\"");
+        json("/sony/appControl", "setActiveApp", "[{\"uri\":\"" + esc + "\",\"data\":\"\"}]", "1.0");
+    }
+
     /** Krátký test spojení – vrátí popis stavu. */
     public String test() throws Exception {
         return isOn() ? "Spojeno ✔ (televize je zapnutá)" : "Spojeno ✔ (televize je v pohotovosti)";
@@ -84,7 +101,7 @@ public final class BraviaWifi {
         HttpURLConnection c = (HttpURLConnection) new URL("http://" + ip + path).openConnection();
         try {
             c.setConnectTimeout(TIMEOUT_MS);
-            c.setReadTimeout(TIMEOUT_MS);
+            c.setReadTimeout(TIMEOUT_MS * 2);
             c.setRequestMethod("POST");
             c.setDoOutput(true);
             c.setRequestProperty("Content-Type", contentType);

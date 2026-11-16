@@ -28,6 +28,32 @@ public final class VoiceCommands {
         return m.matches() ? m.group(2).trim() : null;
     }
 
+    private static final Pattern APP = Pattern.compile(
+            "^\\s*(spust|spustit|otevri|otevrit|pust|zapni|aplikace)\\s+(.+)$");
+
+    /** „spusť YouTube“ → „youtube“; null, pokud věta nezačíná slovesem spuštění. */
+    public static String appQuery(String raw) {
+        Matcher m = APP.matcher(normalize(raw).trim());
+        if (!m.matches()) return null;
+        String rest = m.group(2).replaceFirst("^aplikac[ei] ", "").trim();
+        if (rest.isEmpty() || rest.matches(".*(zvuk|televiz|titulk|teletext|tv).*")) return null;
+        return rest;
+    }
+
+    /** Najde aplikaci podle názvu (bez diakritiky, i část názvu). Vrací {název, uri} nebo null. */
+    public static String[] matchApp(String query, List<String[]> apps) {
+        String q = normalize(query).trim();
+        if (q.isEmpty()) return null;
+        String[] best = null;
+        for (String[] a : apps) {
+            String t = normalize(a[0]).trim();
+            if (t.isEmpty()) continue;
+            boolean hit = t.contains(q) || q.contains(t) || t.replace(" ", "").contains(q.replace(" ", ""));
+            if (hit && (best == null || a[0].length() < best[0].length())) best = a;
+        }
+        return best;
+    }
+
     public static List<String> parse(String raw) {
         String t = normalize(raw);
         List<String> out = new ArrayList<>();

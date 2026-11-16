@@ -774,6 +774,11 @@ public class MainActivity extends Activity {
             else Toast.makeText(this, "Psaní textu funguje jen ve Wi-Fi režimu.", Toast.LENGTH_LONG).show();
             return;
         }
+        String app = VoiceCommands.appQuery(heard.get(0));
+        if (app != null && isWifi()) {
+            launchApp(app, true);
+            return;
+        }
         for (String phrase : heard) {
             List<String> seq = VoiceCommands.parse(phrase);
             if (!seq.isEmpty()) {
@@ -782,7 +787,39 @@ public class MainActivity extends Activity {
                 return;
             }
         }
-        Toast.makeText(this, "Nerozumím: „" + heard.get(0) + "“", Toast.LENGTH_LONG).show();
+        if (isWifi()) {
+            // poslední pokus: celá věta může být název aplikace („YouTube“)
+            launchApp(app != null ? app : heard.get(0), false);
+        } else if (app != null || VoiceCommands.normalize(heard.get(0)).contains("youtube")) {
+            Toast.makeText(this, "Spouštění aplikací (YouTube apod.) funguje jen ve Wi-Fi režimu.",
+                    Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "Nerozumím: „" + heard.get(0) + "“", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private List<String[]> appCache;
+
+    /** Spustí aplikaci na televizi podle názvu (přes Wi-Fi). */
+    private void launchApp(final String query, final boolean explicit) {
+        final BraviaWifi tv = bravia();
+        irHandler.post(() -> {
+            try {
+                if (appCache == null || appCache.isEmpty()) appCache = tv.apps();
+                String[] a = VoiceCommands.matchApp(query, appCache);
+                if (a == null) {
+                    ui.post(() -> Toast.makeText(this, explicit
+                            ? "Aplikaci „" + query + "“ jsem na televizi nenašel."
+                            : "Nerozumím: „" + query + "“", Toast.LENGTH_LONG).show());
+                    return;
+                }
+                tv.launch(a[1]);
+                ui.post(() -> Toast.makeText(this, "Spouštím " + a[0], Toast.LENGTH_SHORT).show());
+            } catch (Exception ex) {
+                appCache = null;
+                wifiError(ex);
+            }
+        });
     }
 
     /** Pošle tlačítka postupně s malou pauzou (např. číslice kanálu). */
