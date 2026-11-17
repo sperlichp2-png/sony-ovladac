@@ -40,18 +40,62 @@ public final class VoiceCommands {
         return rest;
     }
 
+    /** České výslovnosti a přezdívky → text, který je v názvu aplikace na TV. */
+    private static final String[][] ALIASES = {
+            {"youtube pro deti", "youtube kids"}, {"detsky youtube", "youtube kids"}, {"youtube kids", "youtube kids"},
+            {"jutub kids", "youtube kids"}, {"youtube hudba", "youtube music"}, {"youtube music", "youtube music"},
+            {"jutub", "youtube"}, {"jutjub", "youtube"}, {"youtube", "youtube"},
+            {"spotifaj", "spotify"}, {"spotify", "spotify"},
+            {"netflix", "netflix"}, {"netflik", "netflix"},
+            {"amazon", "prime video"}, {"prajm", "prime video"}, {"prime", "prime video"},
+            {"one play", "oneplay"}, {"van plej", "oneplay"}, {"uan plej", "oneplay"}, {"oneplay", "oneplay"},
+            {"onplej", "oneplay"}, {"van play", "oneplay"},
+            {"kodi", "kodi"}, {"kody", "kodi"},
+            {"stremio", "stremio"}, {"stremijo", "stremio"}, {"streamio", "stremio"}, {"strimio", "stremio"},
+            {"obchod", "google play store"}, {"play store", "google play store"}, {"hry", "google play games"},
+            {"filmy", "google play movies"}, {"prohlizec", "internet browser"}, {"internet", "internet browser"},
+            {"hudba", "music"}, {"prehravac", "media player"}, {"spravce souboru", "file manager"},
+            {"soubory", "file manager"}, {"zrcadleni", "screen mirroring"}, {"mirroring", "screen mirroring"},
+            {"casovac", "timer"}, {"napoveda", "help"}, {"nahravky", "recorded title list"},
+            {"nahrane", "recorded title list"}, {"programovy pruvodce", "programme guide"},
+            {"sony select", "sony select"}, {"my bravia", "my bravia"}, {"televize", "tv"},
+    };
+
     /** Najde aplikaci podle názvu (bez diakritiky, i část názvu). Vrací {název, uri} nebo null. */
     public static String[] matchApp(String query, List<String[]> apps) {
         String q = normalize(query).trim();
         if (q.isEmpty()) return null;
-        String[] best = null;
+        // přezdívka → název aplikace (bereme nejdelší shodu, aby „youtube kids“ vyhrálo nad „youtube“)
+        String alias = null;
+        int aliasLen = 0;
+        for (String[] a : ALIASES) {
+            if ((" " + q + " ").contains(" " + a[0]) && a[0].length() > aliasLen) {
+                alias = a[1];
+                aliasLen = a[0].length();
+            }
+        }
+        if (alias != null) {
+            String[] hit = bestMatch(alias, apps);
+            if (hit != null) return hit;
+        }
+        return bestMatch(q, apps);
+    }
+
+    private static String[] bestMatch(String q, List<String[]> apps) {
+        String qs = q.replace(" ", "");
+        String[] exact = null, titleHasQ = null, qHasTitle = null;
         for (String[] a : apps) {
             String t = normalize(a[0]).trim();
+            String ts = t.replace(" ", "");
             if (t.isEmpty()) continue;
-            boolean hit = t.contains(q) || q.contains(t) || t.replace(" ", "").contains(q.replace(" ", ""));
-            if (hit && (best == null || a[0].length() < best[0].length())) best = a;
+            if (ts.equals(qs)) exact = a;
+            else if (ts.contains(qs)) {
+                if (titleHasQ == null || a[0].length() < titleHasQ[0].length()) titleHasQ = a;
+            } else if (qs.contains(ts) && ts.length() >= 2) {
+                if (qHasTitle == null || a[0].length() > qHasTitle[0].length()) qHasTitle = a;
+            }
         }
-        return best;
+        return exact != null ? exact : titleHasQ != null ? titleHasQ : qHasTitle;
     }
 
     public static List<String> parse(String raw) {
