@@ -511,15 +511,17 @@ public class MainActivity extends Activity {
 
     /** Okno pro napsání textu klávesnicí telefonu a odeslání do pole na televizi. */
     private void showKeyboard() {
-        if (!isWifi()) {
-            Toast.makeText(this, "Psaní textu funguje jen ve Wi-Fi režimu (⚙).", Toast.LENGTH_LONG).show();
+        if (typing) {
+            cancelSequence();
+            Toast.makeText(this, "Psaní zastaveno", Toast.LENGTH_SHORT).show();
             return;
         }
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(px(20), px(8), px(20), 0);
         TextView hint = new TextView(this);
-        hint.setText("Nejdřív na televizi otevři vyhledávání (pole pro text), pak sem napiš a dej Odeslat.");
+        hint.setText("Nejdřív na televizi otevři vyhledávání, pak sem napiš a dej Odeslat.\n"
+                + "Netflix: zaškrtni „psát šipkami“ a na televizi dej kurzor na písmeno „a“.");
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         box.addView(hint);
         final EditText e = new EditText(this);
@@ -528,6 +530,12 @@ public class MainActivity extends Activity {
         e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         e.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
         box.addView(e);
+        final android.widget.CheckBox grid = new android.widget.CheckBox(this);
+        grid.setText("Psát šipkami (Netflix, funguje i přes IR)");
+        grid.setChecked(gridTyping() || !isWifi());
+        grid.setEnabled(isWifi());
+        grid.setOnCheckedChangeListener((b, on) -> settings.edit().putBoolean("grid", on).apply());
+        box.addView(grid);
 
         final AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle("Napsat na televizi")
@@ -539,7 +547,12 @@ public class MainActivity extends Activity {
         final Runnable send = () -> {
             String t = e.getText().toString().trim();
             if (t.isEmpty()) return;
-            sendWifiText(t);
+            if (grid.isChecked()) {
+                typeGrid(t);
+                d.dismiss();
+            } else {
+                sendWifiText(t);
+            }
         };
         e.setOnEditorActionListener((v, actionId, ev) -> { send.run(); return true; });
         d.setOnShowListener(x -> {
@@ -825,8 +838,7 @@ public class MainActivity extends Activity {
     private void handleHeard(ArrayList<String> heard) {
         String text = VoiceCommands.searchText(heard.get(0));
         if (text != null) {
-            if (isWifi()) sendWifiText(text);
-            else Toast.makeText(this, "Psaní textu funguje jen ve Wi-Fi režimu.", Toast.LENGTH_LONG).show();
+            typeText(text);
             return;
         }
         String app = VoiceCommands.appQuery(heard.get(0));
@@ -879,14 +891,48 @@ public class MainActivity extends Activity {
 
     /** Pošle tlačítka postupně s malou pauzou (např. číslice kanálu). */
     private void runSequence(List<String> ids) {
+        runSequence(ids, 300);
+    }
+
+    private int sequenceToken = 0;
+    private boolean typing = false;
+
+    private void runSequence(List<String> ids, long step) {
+        final int token = ++sequenceToken;
         long delay = 0;
         for (String id : ids) {
             final Key key = keys.get(id);
             if (key == null) continue;
-            ui.postDelayed(() -> sendKey(key, 3), delay);
-            delay += 300;
+            ui.postDelayed(() -> { if (token == sequenceToken) sendKey(key, 3); }, delay);
+            delay += step;
         }
+        final long total = delay;
+        ui.postDelayed(() -> { if (token == sequenceToken) typing = false; }, total);
         buzz();
+    }
+
+    private void cancelSequence() {
+        sequenceToken++;
+        typing = false;
+    }
+
+    private boolean gridTyping() { return settings.getBoolean("grid", false); }
+
+    /** Napíše text v Netflixu šipkami po tabulce písmen (start na „a“). */
+    private void typeGrid(String text) {
+        List<String> moves = NetflixKeyboard.moves(text);
+        if (moves.isEmpty()) return;
+        typing = true;
+        long step = 350;
+        Toast.makeText(this, "Píšu „" + text + "“ šipkami… (asi " + (moves.size() * step / 1000 + 1)
+                + " s, zastavíš klepnutím na ⌨)", Toast.LENGTH_LONG).show();
+        runSequence(moves, step);
+    }
+
+    /** Text z hlasu nebo klávesnice: šipkami (Netflix / IR), jinak přes Wi-Fi. */
+    private void typeText(String text) {
+        if (gridTyping() || !isWifi()) typeGrid(text);
+        else sendWifiText(text);
     }
 
     // ---------- editor kódu ----------
