@@ -63,7 +63,16 @@ public final class BraviaWifi {
     /** Vloží text do právě otevřeného textového pole (vyhledávání apod.). */
     public void sendText(String text) throws Exception {
         String esc = text.replace("\\", "\\\\").replace("\"", "\\\"");
-        json("/sony/appControl", "setTextForm", "[\"" + esc + "\"]", "1.0");
+        // televize Sony mají dvě podoby parametru – zkusíme obě
+        try {
+            json("/sony/appControl", "setTextForm", "[\"" + esc + "\"]", "1.0");
+        } catch (Exception first) {
+            try {
+                json("/sony/appControl", "setTextForm", "[{\"text\":\"" + esc + "\"}]", "1.0");
+            } catch (Exception second) {
+                throw first;
+            }
+        }
     }
 
     /** Seznam aplikací na televizi: každá položka {název, uri}. */
