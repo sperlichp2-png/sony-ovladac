@@ -175,7 +175,7 @@ public class MainActivity extends Activity {
         editToggle = new TextView(this);
         editToggle.setText("✎");
         editToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        editToggle.setPadding(px(12), px(4), px(12), px(4));
+        editToggle.setPadding(px(8), px(4), px(8), px(4));
         editToggle.setOnClickListener(v -> {
             editMode = !editMode;
             refreshEditToggle();
@@ -188,14 +188,21 @@ public class MainActivity extends Activity {
         TextView mic = new TextView(this);
         mic.setText("🎤");
         mic.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        mic.setPadding(px(10), px(4), px(10), px(4));
+        mic.setPadding(px(8), px(4), px(8), px(4));
         mic.setOnClickListener(v -> startVoice());
         TextView gear = new TextView(this);
         gear.setText("⚙");
         gear.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         gear.setTextColor(Color.parseColor("#8A8A8A"));
-        gear.setPadding(px(10), px(4), px(10), px(4));
+        gear.setPadding(px(8), px(4), px(10), px(4));
         gear.setOnClickListener(v -> showSettings());
+        TextView kbd = new TextView(this);
+        kbd.setText("⌨");
+        kbd.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        kbd.setTextColor(Color.parseColor("#BBBBBB"));
+        kbd.setPadding(px(8), px(4), px(8), px(4));
+        kbd.setOnClickListener(v -> showKeyboard());
+        top.addView(kbd);
         top.addView(mic);
         top.addView(gear);
         top.addView(editToggle);
@@ -500,6 +507,54 @@ public class MainActivity extends Activity {
                                 + ex.getMessage() + ")", Toast.LENGTH_LONG).show());
             }
         });
+    }
+
+    /** Okno pro napsání textu klávesnicí telefonu a odeslání do pole na televizi. */
+    private void showKeyboard() {
+        if (!isWifi()) {
+            Toast.makeText(this, "Psaní textu funguje jen ve Wi-Fi režimu (⚙).", Toast.LENGTH_LONG).show();
+            return;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(px(20), px(8), px(20), 0);
+        TextView hint = new TextView(this);
+        hint.setText("Nejdřív na televizi otevři vyhledávání (pole pro text), pak sem napiš a dej Odeslat.");
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        box.addView(hint);
+        final EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setHint("např. Pelíšky");
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        e.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
+        box.addView(e);
+
+        final AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Napsat na televizi")
+                .setView(box)
+                .setPositiveButton("Odeslat", null)
+                .setNeutralButton("OK na TV", null)
+                .setNegativeButton("Zavřít", null)
+                .create();
+        final Runnable send = () -> {
+            String t = e.getText().toString().trim();
+            if (t.isEmpty()) return;
+            sendWifiText(t);
+        };
+        e.setOnEditorActionListener((v, actionId, ev) -> { send.run(); return true; });
+        d.setOnShowListener(x -> {
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> send.run());
+            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                Key ok = keys.get("ok");
+                if (ok != null) { buzz(); sendKey(ok, 3); }
+            });
+            e.requestFocus();
+            if (d.getWindow() != null) {
+                d.getWindow().setSoftInputMode(
+                        android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            }
+        });
+        d.show();
     }
 
     private long lastErrorToast = 0;
